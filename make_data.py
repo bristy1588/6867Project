@@ -287,6 +287,69 @@ def create_k_hot_dataset(SINGLE_DATASET_SIZE):
 	save_pickle_file(pickle_file, save)
 	return (data, labels)
 
+def randomize(dataset, labels):
+  permutation = np.random.permutation(labels.shape[0])
+  shuffled_dataset = dataset[permutation, :, :, :]
+  shuffled_labels = labels[permutation, :]
+  return shuffled_dataset, shuffled_labels
+
+def data_augmentation(dataset, labels):
+  graph = tf.Graph()
+  with graph.as_default():
+    tf_img = tf.placeholder(tf.float32, shape=(IMAGE_SIZE, IMAGE_SIZE, NUM_CHANNELS))
+
+    flipped_image = tf.image.random_flip_left_right(tf_img)
+
+    brightened_image = tf.image.random_brightness(tf_img, max_delta=50)
+    brightened_image = tf.clip_by_value(brightened_image, 0.0, PIXEL_DEPTH)
+
+    contrasted_image = tf.image.random_contrast(tf_img, lower=0.5, upper=1.5)
+    contrasted_image = tf.clip_by_value(brightened_image, 0.0, PIXEL_DEPTH)
+
+  '''Supplement dataset with flipped, rotated, etc images'''
+  n = len(dataset)
+  new_data, new_labels = make_dataset_arrays(num_rows=n*4)
+  num_new = 0
+
+  with tf.Session(graph=graph) as session:
+    for i in range(len(dataset)):
+      img = np.reshape(dataset[i,:,:,:], (IMAGE_SIZE, IMAGE_SIZE, NUM_CHANNELS))
+      img = np.asarray(img)
+      img = img.astype(np.float32)
+      label = labels[i,:]
+      for _ in range(3):
+        r = random.uniform(0,1)
+        new_img = session.run(flipped_image, feed_dict={tf_img : img})
+        if r < 0.5:
+          new_img = session.run(brightened_image, feed_dict={tf_img : new_img})
+          new_img = session.run(contrasted_image, feed_dict={tf_img : new_img})
+        else:
+          new_img = session.run(contrasted_image, feed_dict={tf_img : new_img})
+          new_img = session.run(brightened_image, feed_dict={tf_img : new_img})
+        new_data[num_new,:,:,:] = new_img
+        new_labels[num_new,:] = label
+        num_new += 1
+
+  assert num_new == n*3
+  new_data[num_new:,:,:,:] = dataset
+  new_labels[num_new:,:] = labels
+  new_data, new_labels = randomize(new_data, new_labels)
+  return new_data, new_labels
+
+def augment_training_set(PICKLE_FILE):
+  print("\nAugmenting training data...")
+  with open(PICKLE_FILE, 'rb') as f:
+    save = pickle.load(f, encoding='latin1')
+    train_X = save['train_data']
+    train_Y = save['train_labels']
+
+  train_RGB = (train_X * PIXEL_DEPTH) + PIXEL_DEPTH / 2.0 
+  new_train, new_labels = data_augmentation(train_RGB, train_Y)
+  new_train = scale_pixel_values(new_train)
+
+  save['train_data'] = new_train
+  save['train_labels'] = new_labels
+  save_pickle_file('augmented_medical_data.pickle', save)
 
 create_k_hot_dataset(2000)
 
